@@ -1,0 +1,24 @@
+[project]
+name = "churn-prediction"
+version = "0.1.0"
+description = "Churn Prediction skeleton (Clean Architecture, mock ML)"
+authors = [
+    {name = "kris",email = "klebedeva14052003@gmail.com"}
+]
+requires-python = ">=3.10,<4.0"
+dependencies = [
+    "pydantic>=2.7.0",
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+]
+
+[tool.poetry]
+packages = [{ include = "src" }]
+
+[tool.pytest.ini_options]
+addopts = "--cov=src --cov-report=term-missing --cov-fail-under=100"
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
