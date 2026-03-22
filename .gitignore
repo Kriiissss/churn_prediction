@@ -26,3 +26,12 @@ poetry.lock
 .DS_Store
 Thumbs.db
 
+### Secrets / локальная конфигурация
+.env
+
+### DVC (кэш артефактов не храним в Git; см. также .dvc/.gitignore)
+.dvc/cache/
+
+### Данные (корпус под версионированием DVC; сырые файлы не коммитим)
+/data/corpus/
+

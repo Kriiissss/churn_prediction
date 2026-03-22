@@ -1,0 +1,6 @@
+[core]
+    remote = myremote
+['remote "myremote"']
+    url = s3://datasets/dvc-store
+    endpointurl = http://localhost:9000
+    ssl_verify = false

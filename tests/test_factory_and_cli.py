@@ -80,3 +80,24 @@ def test_cli_executes_and_prints_output(monkeypatch: pytest.MonkeyPatch, capsys:
     for line in expected_reco_lines:
         assert line in out
 
+
+def test_cli_detect_language_mode(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "prog",
+            "--text",
+            "The quick brown fox jumps over the lazy dog and visits museums in London.",
+        ],
+    )
+    runpy.run_module("src.presentation.cli", run_name="__main__")
+    out = capsys.readouterr().out
+    assert "Detected language: en" in out
+    assert "Available languages:" in out
+
+
+def test_cli_churn_mode_requires_all_args(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["prog", "--client_id", "1"])
+    with pytest.raises(SystemExit):
+        runpy.run_module("src.presentation.cli", run_name="__main__")
