@@ -121,3 +121,86 @@ poetry run dvc push
 poetry run pytest -q
 poetry run python scripts/lab_verify.py
 ```
+
+## Лабораторная 3: FastAPI + ONNX (определение языка)
+
+### 1) Обучение + экспорт в ONNX
+
+Модель обучается строго по корпусу `data/corpus/<lang>/*.txt` и сохраняет:
+- `models/language_detector.onnx`
+- `models/classes.json`
+
+```bash
+cd E:\pythonProdgect\churn_prediction
+poetry run python scripts/train_model.py --corpus-root data/corpus --models-dir models
+```
+
+### 2) Загрузка модели в MinIO (бакет `models`)
+
+Команда обучения `scripts/train_model.py` после сохранения автоматически загрузит:
+- `language_detector.onnx`
+- `classes.json`
+
+в бакет `models` (по умолчанию) по ключам `language_detector.onnx` и `classes.json`.
+
+Если бакет называется иначе, переопределите `MINIO_MODELS_BUCKET` в `.env`.
+
+Важно: чтобы загрузка сработала, MinIO должен быть запущен:
+
+```bash
+cd E:\pythonProdgect\churn_prediction
+docker compose up -d
+```
+
+### 3) Запуск API
+
+```bash
+cd E:\pythonProdgect\churn_prediction
+poetry run uvicorn src.presentation.api:app --reload --port 8000
+```
+
+### 4) Проверка endpoint
+
+PowerShell:
+
+```powershell
+Invoke-RestMethod -Method Post -Uri "http://localhost:8000/api/v1/text/detect_language" -ContentType "application/json" -Body '{"text":"Hallo Welt"}'
+```
+
+Ожидаемый формат:
+
+```json
+{
+  "language_code": "de",
+  "confidence": 0.97
+}
+```
+
+### 5) Если модели нет локально (скачивание из MinIO)
+
+При старте API `src/presentation/dependencies.py` проверяет наличие:
+- `models/language_detector.onnx`
+- `models/classes.json`
+
+Если файлов нет — скачивает их из MinIO/S3 по ключам:
+- бакет `models` (по умолчанию; переопределяется переменной `MINIO_MODELS_BUCKET`)
+- ключи:
+  - `language_detector.onnx`
+  - `classes.json`
+
+Ключи можно переопределить env-переменными:
+- `LANGUAGE_MODEL_ONNX_REMOTE_KEY`
+- `LANGUAGE_MODEL_CLASSES_REMOTE_KEY`
+
+Чтобы проверить fallback:
+
+```bat
+rmdir /s /q models
+poetry run uvicorn src.presentation.api:app --reload --port 8000
+```
+
+### 6) Запуск автотестов
+
+```bash
+poetry run python -m pytest -q
+```

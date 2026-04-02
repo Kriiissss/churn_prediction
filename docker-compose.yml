@@ -1,4 +1,4 @@
-# MinIO: API :9000, консоль :9001. Бакет `datasets` создаётся сервисом minio-init (mc).
+# MinIO: API :9000, консоль :9001. Бакеты `datasets` и `models` создаются сервисом `minio-mc` (mc).
 services:
   minio:
     image: minio/minio:latest
@@ -15,17 +15,23 @@ services:
     networks:
       - churn_net
 
-  minio-init:
+  # Утилита mc для инициализации бакетов и ручной загрузки артефактов.
+  # Держим контейнер живым, чтобы можно было выполнять docker compose exec ...
+  minio-mc:
     image: minio/mc:latest
-    container_name: churn_minio_init
+    container_name: churn_minio_mc
     depends_on:
       - minio
+    volumes:
+      - ./:/work
     entrypoint: >
       /bin/sh -c "
       sleep 5;
       mc alias set myminio http://minio:9000 minioadmin minioadmin;
       mc mb myminio/datasets --ignore-existing;
-      echo 'Бакет datasets готов';
+      mc mb myminio/models --ignore-existing;
+      echo 'Бакеты datasets и models готовы';
+      tail -f /dev/null;
       "
     networks:
       - churn_net

@@ -45,3 +45,22 @@ class IDataStorage(ABC):
         """Загрузить локальный файл в объектное хранилище по ключу remote_path."""
         raise NotImplementedError
 
+
+class IModel(ABC):
+    """
+    Универсальный интерфейс для ML-моделей, которые принимают список строк
+    и возвращают вероятности по классам + список классов (в фиксированном порядке).
+    """
+
+    @abstractmethod
+    def predict(self, texts: list[str]) -> tuple[list[list[float]], list[str]]:
+        """
+        Аргументы:
+            texts: список текстов.
+
+        Возвращает:
+            probabilities: shape ~ [batch_size, num_classes] (как Python list).
+            labels: порядок классов, соответствующий колонкам probabilities.
+        """
+        raise NotImplementedError
+

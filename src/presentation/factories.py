@@ -36,14 +36,19 @@ def create_language_detector(
 
 def create_s3_storage(
     settings: StorageSettings | None = None,
+    bucket_override: str | None = None,
 ) -> IDataStorage:
-    """S3/MinIO-хранилище из настроек окружения (.env)."""
+    """
+    S3/MinIO-хранилище из настроек окружения (.env).
+
+    bucket_override позволяет использовать другой бакет (например, для `models`).
+    """
     # Ленивый импорт: boto3 нужен только для сценариев с объектным хранилищем.
     from src.infrastructure.s3_storage import S3Storage
 
     resolved = settings or load_storage_settings()
     return S3Storage(
-        bucket=resolved.bucket,
+        bucket=resolved.bucket if bucket_override is None else bucket_override,
         endpoint_url=resolved.endpoint_url,
         access_key=resolved.access_key,
         secret_key=resolved.secret_key,

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from src.domain.entities import ChurnRisk, CustomerActivity
-from src.domain.interfaces import IChurnModel
+from src.domain.interfaces import IChurnModel, IModel
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,4 +44,26 @@ class ChurnAnalysisService:
             total_spend=activity.total_spend,
             support_tickets_count=max(0, activity.support_tickets_count + self._config.support_increment_on_low_loyalty),
         )
+
+
+class InferenceService:
+    """
+    Use-case: inference определения языка текста.
+
+    Логика:
+      - передаем текст(ы) в IModel
+      - берём max(probabilities)
+      - возвращаем (language_code, confidence)
+    """
+
+    def __init__(self, model: IModel) -> None:
+        self._model = model
+
+    def predict(self, text: str) -> tuple[str, float]:
+        probabilities, labels = self._model.predict([text])
+
+        # probabilities: [1, num_classes]
+        row = probabilities[0]
+        best_idx = max(range(len(row)), key=lambda i: row[i])
+        return labels[best_idx], float(row[best_idx])
 
