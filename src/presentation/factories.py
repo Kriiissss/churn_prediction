@@ -70,3 +70,26 @@ def create_data_sync_service(
     )
     return DataSyncService(storage=resolved_storage, config=resolved_config)
 
+
+def create_language_model_sync_service(
+    *,
+    storage: IDataStorage | None = None,
+    settings: StorageSettings | None = None,
+) -> DataSyncService:
+    """
+    Синхронизация ONNX + classes.json по фиксированным ключам S3 в бакете `models`.
+
+    В типовом сценарии ЛР3 FastAPI подтягивает артефакты через DVC (`dvc pull`): remote вида
+    `s3://models/dvc-store` хранит объекты под префиксом `dvc-store/`, а не как `language_detector.onnx` в корне.
+    Фабрика остаётся для тестов и редких ручных загрузок по ключам.
+    """
+    resolved_settings = settings or load_storage_settings()
+    resolved_storage = storage or create_s3_storage(resolved_settings, bucket_override=resolved_settings.models_bucket)
+    cfg = DataSyncConfig(
+        items=(
+            (resolved_settings.language_model_onnx_remote_key, resolved_settings.language_model_onnx_local_file),
+            (resolved_settings.language_model_classes_remote_key, resolved_settings.language_model_classes_local_file),
+        )
+    )
+    return DataSyncService(storage=resolved_storage, config=cfg)
+

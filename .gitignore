@@ -35,6 +35,8 @@ Thumbs.db
 ### Данные (корпус под версионированием DVC; сырые файлы не коммитим)
 /data/corpus/
 
-### ML модели (обученные артефакты ONNX / классы)
-/models/
+### ML модели (бинарники не коммитим; метаданные DVC — да)
+/models/*.onnx
+/models/classes.json
+/models/.cache/
 

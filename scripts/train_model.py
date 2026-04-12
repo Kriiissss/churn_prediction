@@ -12,7 +12,8 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
+import subprocess
+import sys
 from pathlib import Path
 
 from sklearn.feature_extraction.text import CountVectorizer
@@ -25,9 +26,6 @@ from skl2onnx import convert_sklearn
 from skl2onnx.common.data_types import StringTensorType
 
 import onnx  # noqa: F401  # требуется для проверки/сериализации, типы зависят от сборки
-import boto3
-from dotenv import load_dotenv
-from botocore.exceptions import EndpointConnectionError, NoCredentialsError
 
 
 def load_dataset(path: str):
@@ -77,55 +75,41 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
-def _upload_models_to_minio(
-    *,
-    models_dir: Path,
-    remote_onnx_key: str,
-    remote_classes_key: str,
-) -> None:
-    """
-    Загружает обученные файлы модели в MinIO/S3 бакет `models`.
-
-    Настройки берутся из `.env` в корне репозитория.
-    """
-    load_dotenv(dotenv_path=_repo_root() / ".env")
-
-    endpoint = os.getenv("MINIO_ENDPOINT")
-    access_key = os.getenv("MINIO_ACCESS_KEY")
-    secret_key = os.getenv("MINIO_SECRET_KEY")
-    models_bucket = os.getenv("MINIO_MODELS_BUCKET", "models")
-
-    if not endpoint or not access_key or not secret_key:
-        # Если в окружении нет MinIO-конфига — не валимся жёстко, просто уведомим.
-        print("MinIO credentials are missing (.env). Skip uploading models.")
-        return
-
-    onnx_local = models_dir / "language_detector.onnx"
-    classes_local = models_dir / "classes.json"
-    if not onnx_local.is_file():
-        raise FileNotFoundError(f"Missing ONNX file: {onnx_local}")
-    if not classes_local.is_file():
-        raise FileNotFoundError(f"Missing classes file: {classes_local}")
-
-    client = boto3.client(
-        "s3",
-        endpoint_url=endpoint,
-        aws_access_key_id=access_key,
-        aws_secret_access_key=secret_key,
+def _dvc_run(*args: str, timeout: float = 120.0) -> subprocess.CompletedProcess[str]:
+    """DVC из того же venv, что и текущий интерпретатор (надёжно под poetry run)."""
+    return subprocess.run(
+        [sys.executable, "-m", "dvc", *args],
+        cwd=_repo_root(),
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
     )
 
-    print(f"Uploading models to s3://{models_bucket}/ ...")
-    try:
-        client.upload_file(str(onnx_local), models_bucket, remote_onnx_key)
-        client.upload_file(str(classes_local), models_bucket, remote_classes_key)
-        print("Models uploaded.")
-    except EndpointConnectionError as e:
+
+def _dvc_push_models(*, onnx_dvc: Path, classes_dvc: Path) -> None:
+    """
+    Отправляет артефакты модели в MinIO через DVC remote `models_storage`.
+
+    Требования:
+      - MinIO запущен
+      - remote `models_storage` настроен (см. README)
+    """
+    out = _dvc_run(
+        "push",
+        "-r",
+        "models_storage",
+        str(onnx_dvc),
+        str(classes_dvc),
+        timeout=600.0,
+    )
+    if out.returncode != 0:
         raise RuntimeError(
-            f"Cannot connect to MinIO at {endpoint}. "
-            "Start MinIO with: `docker compose up -d` and try again."
-        ) from e
-    except NoCredentialsError as e:
-        raise RuntimeError("MinIO credentials are missing/invalid in .env") from e
+            "dvc push failed.\n"
+            f"stdout:\n{out.stdout}\n"
+            f"stderr:\n{out.stderr}\n"
+            "Hint: start MinIO (`docker compose up -d`) and verify DVC remote `models_storage`."
+        )
 
 
 class LanguageDetectorSklearn:
@@ -149,6 +133,11 @@ def main() -> int:
     parser.add_argument("--models-dir", type=Path, default=Path("models"))
     parser.add_argument("--test-size", type=float, default=0.2)
     parser.add_argument("--random-state", type=int, default=42)
+    parser.add_argument(
+        "--skip-dvc",
+        action="store_true",
+        help="Не выполнять dvc add/push (только локальное обучение и экспорт ONNX).",
+    )
     args = parser.parse_args()
 
     texts, labels = load_dataset(str(args.corpus_root))
@@ -192,16 +181,30 @@ def main() -> int:
     args.models_dir.mkdir(parents=True, exist_ok=True)
     onnx.save_model(onnx_model, str(onnx_path))
 
-    # По требованию: после обучения отправляем модель и classes.json в MinIO.
-    # remote keys лежат на верхнем уровне бакета `models`.
-    _upload_models_to_minio(
-        models_dir=args.models_dir,
-        remote_onnx_key=os.getenv("LANGUAGE_MODEL_ONNX_REMOTE_KEY", "language_detector.onnx"),
-        remote_classes_key=os.getenv("LANGUAGE_MODEL_CLASSES_REMOTE_KEY", "classes.json"),
-    )
-
     print(f"Saved ONNX: {onnx_path}")
     print(f"Saved classes: {classes_path}")
+
+    if args.skip_dvc:
+        print("Skip DVC: --skip-dvc")
+        return 0
+
+    # Версионирование модели через DVC + remote `models_storage` (бакет `models` в MinIO).
+    add_out = _dvc_run("add", str(onnx_path), str(classes_path), timeout=600.0)
+    if add_out.returncode != 0:
+        raise RuntimeError(
+            "dvc add failed.\n"
+            f"stdout:\n{add_out.stdout}\n"
+            f"stderr:\n{add_out.stderr}\n"
+            "Hint: ensure DVC is initialized and remote `models_storage` exists (see README)."
+        )
+
+    onnx_dvc = onnx_path.with_suffix(onnx_path.suffix + ".dvc")
+    classes_dvc = classes_path.with_suffix(classes_path.suffix + ".dvc")
+    _dvc_push_models(onnx_dvc=onnx_dvc, classes_dvc=classes_dvc)
+
+    print("DVC: models pushed to remote `models_storage`.")
+    print("DVC: verify workspace state:")
+    print("  poetry run dvc status")
 
     return 0
 

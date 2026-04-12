@@ -69,11 +69,12 @@ def check_minio_s3() -> bool:
             aws_access_key_id=s.access_key,
             aws_secret_access_key=s.secret_key,
         )
-        client.head_bucket(Bucket=s.bucket)
+        for bucket in (s.bucket, s.models_bucket):
+            client.head_bucket(Bucket=bucket)
     except Exception as e:  # noqa: BLE001
         _fail(f"MinIO/S3: {e}")
         return False
-    _ok(f"бакет «{s.bucket}» доступен ({s.endpoint_url})")
+    _ok(f"бакеты «{s.bucket}» и «{s.models_bucket}» доступны ({s.endpoint_url})")
     return True
 
 
@@ -137,10 +138,13 @@ def check_dvc_metadata() -> bool:
         if "myremote" not in out.stdout and "datasets" not in out.stdout:
             _fail(f"неожиданный вывод dvc remote list:\n{out.stdout}")
             return False
+        if "models_storage" not in out.stdout:
+            _fail("в `dvc remote list` нет remote `models_storage` (см. README, ЛР3)")
+            return False
     except subprocess.TimeoutExpired:
         _fail("таймаут dvc remote list")
         return False
-    _ok("dvc remote list выполнен")
+    _ok("dvc remote list: есть myremote и models_storage")
     return True
 
 

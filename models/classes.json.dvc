@@ -1,0 +1,5 @@
+outs:
+- md5: fc5d4ca138d9e1cd2b8bec70b8235911
+  size: 39
+  hash: md5
+  path: classes.json

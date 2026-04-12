@@ -1,0 +1,5 @@
+outs:
+- md5: 8c0155a5aecff221f6167a8886d6374e
+  size: 34046
+  hash: md5
+  path: language_detector.onnx
