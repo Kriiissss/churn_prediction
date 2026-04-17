@@ -60,7 +60,8 @@ class InferenceService:
         self._model = model
 
     def predict(self, text: str) -> tuple[str, float]:
-        probabilities, labels = self._model.predict([text])
+        # Нормализуем регистр здесь, т.к. pipeline обучается с lowercase=False.
+        probabilities, labels = self._model.predict([text.lower()])
 
         # probabilities: [1, num_classes]
         row = probabilities[0]

@@ -50,7 +50,7 @@ def load_dataset(path: str):
             text = txt_path.read_text(encoding="utf-8")
             if not text.strip():
                 continue
-            texts.append(text)
+            texts.append(text.lower())
             labels.append(label)
 
     if not texts:
@@ -65,7 +65,8 @@ def build_pipeline() -> Pipeline:
       CountVectorizer(analyzer='char', ngram_range=(1,3))
       LogisticRegression(max_iter=1000)
     """
-    vectorizer = CountVectorizer(analyzer="char", ngram_range=(1, 3))
+    # Важно: lowercase=False убирает StringNormalizer из ONNX-графа и зависимость от locale.
+    vectorizer = CountVectorizer(analyzer="char", ngram_range=(1, 3), lowercase=False)
     clf = LogisticRegression(max_iter=1000)
     return Pipeline([("vect", vectorizer), ("clf", clf)])
 

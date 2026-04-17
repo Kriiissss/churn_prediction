@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from fastapi import Depends, FastAPI
+from celery.result import AsyncResult
+from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
-from src.application.services import InferenceService
-from src.presentation.dependencies import get_inference_service
+from src.presentation.celery_app import celery_app
+from src.presentation.tasks import detect_language_task
 
 
 app = FastAPI(title="Churn Prediction + Language Detection (FastAPI)")
@@ -14,19 +15,47 @@ class DetectLanguageRequest(BaseModel):
     text: str = Field(min_length=1, description="Текст для определения языка")
 
 
-class DetectLanguageResponse(BaseModel):
-    language_code: str
-    confidence: float
+class AsyncTaskResponse(BaseModel):
+    task_id: str
+
+
+class AsyncResultResponse(BaseModel):
+    task_id: str
+    status: str
+    result: dict[str, float | str] | None = None
 
 
 @app.post(
-    "/api/v1/text/detect_language",
-    response_model=DetectLanguageResponse,
+    "/api/v1/text/detect_language_async",
+    response_model=AsyncTaskResponse,
+    status_code=202,
 )
-def detect_language(
-    payload: DetectLanguageRequest,
-    service: InferenceService = Depends(get_inference_service),
-) -> DetectLanguageResponse:
-    language_code, confidence = service.predict(payload.text)
-    return DetectLanguageResponse(language_code=language_code, confidence=confidence)
+def detect_language_async(payload: DetectLanguageRequest) -> AsyncTaskResponse:
+    task = detect_language_task.delay(payload.text)
+    return AsyncTaskResponse(task_id=task.id)
+
+
+@app.get(
+    "/api/v1/text/results/{task_id}",
+    response_model=AsyncResultResponse,
+)
+def get_language_result(task_id: str) -> AsyncResultResponse:
+    task_result = AsyncResult(task_id, app=celery_app)
+    is_failed = getattr(task_result, "failed", lambda: task_result.status == "FAILURE")()
+    if is_failed:
+        return AsyncResultResponse(
+            task_id=task_id,
+            status=task_result.status,
+            result={"error": str(task_result.result)},
+        )
+    if task_result.ready():
+        result = task_result.get()
+        if not isinstance(result, dict):
+            result = {"raw_result": str(result)}
+        return AsyncResultResponse(
+            task_id=task_id,
+            status=task_result.status,
+            result=result,
+        )
+    return AsyncResultResponse(task_id=task_id, status=task_result.status)
 

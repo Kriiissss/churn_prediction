@@ -1,5 +1,50 @@
-# MinIO: API :9000, консоль :9001. Бакеты `datasets` и `models` создаются сервисом `minio-mc` (mc).
 services:
+  broker:
+    image: redis:7-alpine
+    container_name: churn_redis
+    ports:
+      - "6379:6379"
+    networks:
+      - churn_net
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: churn_api
+    ports:
+      - "8000:8000"
+    environment:
+      REDIS_URL: redis://broker:6379/0
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: datasets
+      MINIO_MODELS_BUCKET: models
+    depends_on:
+      - broker
+      - minio
+    networks:
+      - churn_net
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: churn_worker
+    environment:
+      REDIS_URL: redis://broker:6379/0
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: datasets
+      MINIO_MODELS_BUCKET: models
+    depends_on:
+      - broker
+      - minio
+    networks:
+      - churn_net
+
   minio:
     image: minio/minio:latest
     container_name: churn_minio
@@ -15,8 +60,6 @@ services:
     networks:
       - churn_net
 
-  # Утилита mc для инициализации бакетов и ручной загрузки артефактов.
-  # Держим контейнер живым, чтобы можно было выполнять docker compose exec ...
   minio-mc:
     image: minio/mc:latest
     container_name: churn_minio_mc

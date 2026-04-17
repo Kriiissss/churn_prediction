@@ -304,3 +304,58 @@ poetry run uvicorn src.presentation.api:app --reload --port 8000
 ```bash
 poetry run python -m pytest -q
 ```
+
+## Лабораторная 4 (вариант 13): асинхронное определение языка
+
+Реализованы требования варианта:
+- `POST /api/v1/text/detect_language_async` -> возвращает `{ "task_id": "..." }` (HTTP 202).
+- `GET /api/v1/text/results/{task_id}` -> возвращает статус задачи и итог:
+  `{ "status": "SUCCESS", "result": { "language_code": "en", "confidence": 0.99 } }`.
+
+### Новые компоненты
+
+- `src/presentation/celery_app.py` — настройка Celery + Redis broker/backend.
+- `src/presentation/tasks.py` — Celery task `detect_language`.
+- `Dockerfile.api` — контейнер FastAPI.
+- `Dockerfile.worker` — контейнер Celery worker.
+- `docker-compose.yml` — `api`, `worker`, `broker` (Redis), `minio`, `minio-mc`.
+
+### Запуск всей системы
+
+```bash
+docker compose up -d --build
+```
+
+### Проверка API (вариант 13)
+
+1) Создать задачу:
+
+```bash
+curl -sS -X POST "http://127.0.0.1:8000/api/v1/text/detect_language_async" \
+  -H "Content-Type: application/json" \
+  -d "{\"text\":\"Hallo Welt\"}"
+```
+
+Ответ:
+
+```json
+{"task_id":"<uuid>"}
+```
+
+2) Проверить результат:
+
+```bash
+curl -sS "http://127.0.0.1:8000/api/v1/text/results/<uuid>"
+```
+
+Сначала обычно:
+
+```json
+{"task_id":"<uuid>","status":"PENDING","result":null}
+```
+
+Потом:
+
+```json
+{"task_id":"<uuid>","status":"SUCCESS","result":{"language_code":"de","confidence":0.97}}
+```
