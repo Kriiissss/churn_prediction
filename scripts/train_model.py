@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
+import onnx
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
@@ -25,8 +27,8 @@ from sklearn.pipeline import Pipeline
 from skl2onnx import convert_sklearn
 from skl2onnx.common.data_types import StringTensorType
 
-import onnx  # noqa: F401  # требуется для проверки/сериализации, типы зависят от сборки
-
+MLFLOW_ONNX_ARTIFACT_PATH = "language_model_onnx"
+MLFLOW_META_ARTIFACT_PATH = "language_model_artifacts"
 
 def load_dataset(path: str):
     """
@@ -139,6 +141,14 @@ def main() -> int:
         action="store_true",
         help="Не выполнять dvc add/push (только локальное обучение и экспорт ONNX).",
     )
+    parser.add_argument("--model-name", type=str, default=os.getenv("MLFLOW_MODEL_NAME", "language_detector"))
+    parser.add_argument("--model-stage", type=str, default=os.getenv("MLFLOW_MODEL_STAGE", "Production"))
+    parser.add_argument("--accuracy-threshold", type=float, default=0.98)
+    parser.add_argument(
+        "--mlflow-experiment",
+        type=str,
+        default=os.getenv("MLFLOW_EXPERIMENT_NAME", "lab5_variant13_language_detector"),
+    )
     args = parser.parse_args()
 
     texts, labels = load_dataset(str(args.corpus_root))
@@ -151,61 +161,86 @@ def main() -> int:
         stratify=labels if len(set(labels)) > 1 else None,
     )
 
-    model = build_pipeline()
-    model.fit(x_train, y_train)
+    tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5000")
+    import mlflow
+    import mlflow.onnx
 
-    y_pred = model.predict(x_test)
-    acc = accuracy_score(y_test, y_pred)
-    print(f"Accuracy: {acc:.4f} (test_size={args.test_size})")
+    mlflow.set_tracking_uri(tracking_uri)
+    mlflow.set_experiment(args.mlflow_experiment)
 
-    # Требование: сохранить mapping классов.
-    # LogisticRegression хранит порядок классов в clf.classes_.
-    classes = list(model.named_steps["clf"].classes_)
-    # Требование ЛР: чтобы существовал `model.classes_`,
-    # поэтому оборачиваем pipeline в объект со settable атрибутом.
-    model_with_classes = LanguageDetectorSklearn(pipeline=model, classes=classes)
-
-    args.models_dir.mkdir(parents=True, exist_ok=True)
-    classes_path = args.models_dir / "classes.json"
-    with classes_path.open("w", encoding="utf-8") as f:
-        json.dump(model_with_classes.classes_, f, ensure_ascii=False, indent=2)
-
-    # Конвертация ВЕСЬ pipeline в ONNX.
-    # Важно: initial_types должен быть string tensor.
-    initial_types = [("input", StringTensorType([None]))]
-
-    # Отключаем zipmap, чтобы получить вероятности как тензор.
-    options = {id(model.named_steps["clf"]): {"zipmap": False}}
-
-    onnx_model = convert_sklearn(model, initial_types=initial_types, options=options)
-    onnx_path = args.models_dir / "language_detector.onnx"
-    args.models_dir.mkdir(parents=True, exist_ok=True)
-    onnx.save_model(onnx_model, str(onnx_path))
-
-    print(f"Saved ONNX: {onnx_path}")
-    print(f"Saved classes: {classes_path}")
-
-    if args.skip_dvc:
-        print("Skip DVC: --skip-dvc")
-        return 0
-
-    # Версионирование модели через DVC + remote `models_storage` (бакет `models` в MinIO).
-    add_out = _dvc_run("add", str(onnx_path), str(classes_path), timeout=600.0)
-    if add_out.returncode != 0:
-        raise RuntimeError(
-            "dvc add failed.\n"
-            f"stdout:\n{add_out.stdout}\n"
-            f"stderr:\n{add_out.stderr}\n"
-            "Hint: ensure DVC is initialized and remote `models_storage` exists (see README)."
+    with mlflow.start_run(run_name="train_language_detector"):
+        mlflow.log_params(
+            {
+                "model_name": args.model_name,
+                "model_stage": args.model_stage,
+                "vectorizer_analyzer": "char",
+                "vectorizer_ngram_range": "(1,3)",
+                "classifier": "LogisticRegression",
+                "classifier_max_iter": 1000,
+                "test_size": args.test_size,
+                "random_state": args.random_state,
+            }
         )
 
-    onnx_dvc = onnx_path.with_suffix(onnx_path.suffix + ".dvc")
-    classes_dvc = classes_path.with_suffix(classes_path.suffix + ".dvc")
-    _dvc_push_models(onnx_dvc=onnx_dvc, classes_dvc=classes_dvc)
+        model = build_pipeline()
+        model.fit(x_train, y_train)
 
-    print("DVC: models pushed to remote `models_storage`.")
-    print("DVC: verify workspace state:")
-    print("  poetry run dvc status")
+        y_pred = model.predict(x_test)
+        acc = accuracy_score(y_test, y_pred)
+        mlflow.log_metric("accuracy", float(acc))
+        print(f"Accuracy: {acc:.4f} (test_size={args.test_size})")
+
+        # Требование: сохранить mapping классов.
+        # LogisticRegression хранит порядок классов в clf.classes_.
+        classes = list(model.named_steps["clf"].classes_)
+        model_with_classes = LanguageDetectorSklearn(pipeline=model, classes=classes)
+
+        args.models_dir.mkdir(parents=True, exist_ok=True)
+        classes_path = args.models_dir / "classes.json"
+        with classes_path.open("w", encoding="utf-8") as f:
+            json.dump(model_with_classes.classes_, f, ensure_ascii=False, indent=2)
+
+        # Конвертация ВЕСЬ pipeline в ONNX.
+        initial_types = [("input", StringTensorType([None]))]
+        options = {id(model.named_steps["clf"]): {"zipmap": False}}
+        onnx_model = convert_sklearn(model, initial_types=initial_types, options=options)
+        onnx_path = args.models_dir / "language_detector.onnx"
+        onnx.save_model(onnx_model, str(onnx_path))
+        print(f"Saved ONNX: {onnx_path}")
+        print(f"Saved classes: {classes_path}")
+
+        onnx_proto = onnx.load(str(onnx_path))
+        mlflow.onnx.log_model(
+            onnx_model=onnx_proto,
+            artifact_path=MLFLOW_ONNX_ARTIFACT_PATH,
+            registered_model_name=args.model_name,
+        )
+        mlflow.log_artifact(str(classes_path), artifact_path=MLFLOW_META_ARTIFACT_PATH)
+
+        if acc < args.accuracy_threshold:
+            raise RuntimeError(f"Quality gate failed: accuracy={acc:.4f} <= {args.accuracy_threshold}")
+
+        if args.skip_dvc:
+            print("Skip DVC: --skip-dvc")
+            return 0
+
+        # Версионирование модели через DVC + remote `models_storage` (бакет `models` в MinIO).
+        add_out = _dvc_run("add", str(onnx_path), str(classes_path), timeout=600.0)
+        if add_out.returncode != 0:
+            raise RuntimeError(
+                "dvc add failed.\n"
+                f"stdout:\n{add_out.stdout}\n"
+                f"stderr:\n{add_out.stderr}\n"
+                "Hint: ensure DVC is initialized and remote `models_storage` exists (see README)."
+            )
+
+        onnx_dvc = onnx_path.with_suffix(onnx_path.suffix + ".dvc")
+        classes_dvc = classes_path.with_suffix(classes_path.suffix + ".dvc")
+        _dvc_push_models(onnx_dvc=onnx_dvc, classes_dvc=classes_dvc)
+
+        print("DVC: models pushed to remote `models_storage`.")
+        print("DVC: verify workspace state:")
+        print("  poetry run dvc status")
 
     return 0
 

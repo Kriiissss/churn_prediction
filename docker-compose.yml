@@ -16,6 +16,9 @@ services:
       - "8000:8000"
     environment:
       REDIS_URL: redis://broker:6379/0
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_MODEL_NAME: language_detector
+      MLFLOW_MODEL_STAGE: Production
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
@@ -23,6 +26,7 @@ services:
       MINIO_MODELS_BUCKET: models
     depends_on:
       - broker
+      - mlflow
       - minio
     networks:
       - churn_net
@@ -34,6 +38,9 @@ services:
     container_name: churn_worker
     environment:
       REDIS_URL: redis://broker:6379/0
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_MODEL_NAME: language_detector
+      MLFLOW_MODEL_STAGE: Production
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
@@ -41,6 +48,7 @@ services:
       MINIO_MODELS_BUCKET: models
     depends_on:
       - broker
+      - mlflow
       - minio
     networks:
       - churn_net
@@ -73,9 +81,33 @@ services:
       mc alias set myminio http://minio:9000 minioadmin minioadmin;
       mc mb myminio/datasets --ignore-existing;
       mc mb myminio/models --ignore-existing;
-      echo 'Бакеты datasets и models готовы';
+      mc mb myminio/mlflow --ignore-existing;
+      echo 'Бакеты datasets, models и mlflow готовы';
       tail -f /dev/null;
       "
+    networks:
+      - churn_net
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    container_name: churn_mlflow
+    ports:
+      - "5000:5000"
+    environment:
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      AWS_DEFAULT_REGION: us-east-1
+    depends_on:
+      - minio
+      - minio-mc
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --default-artifact-root s3://mlflow/artifacts/
+    volumes:
+      - ./data/mlflow:/mlflow
     networks:
       - churn_net
 

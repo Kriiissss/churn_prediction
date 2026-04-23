@@ -284,9 +284,14 @@ poetry run python -c "import requests; print(requests.post('http://localhost:800
 - `models/language_detector.onnx`
 - `models/classes.json`
 
-Если файлов нет — выполняется **`dvc pull -r models_storage`** для `models/language_detector.onnx.dvc` и `models/classes.json.dvc`. Это согласовано с remote `s3://models/dvc-store`: DVC хранит бинарники под префиксом `dvc-store/`, их нельзя корректно подтянуть «обычным» S3-скачиванием по имени файла из корня бакета.
+Если файлов нет — API/worker скачивают артефакты только из **MLflow Model Registry**:
+- имя модели: `language_detector`;
+- stage: `Production`.
 
-Нужны: запущенный MinIO, секция `models_storage` в `.dvc/config.local`, и сами `*.dvc` после обучения (в репозитории или у вас локально).
+Нужны:
+- `MLFLOW_TRACKING_URI`;
+- доступ к artifact store (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `MLFLOW_S3_ENDPOINT_URL`);
+- опубликованная версия модели в стадии `Production`.
 
 Проверка вручную (удалить только бинарники и JSON, **не** удалять `models/*.dvc`):
 
@@ -297,7 +302,7 @@ Remove-Item -Force models\language_detector.onnx, models\classes.json -ErrorActi
 poetry run uvicorn src.presentation.api:app --reload --port 8000
 ```
 
-После старта файлы снова появятся в `models/` (проверьте `Get-ChildItem models`).
+После старта файлы снова появятся в `models/` (проверьте `Get-ChildItem models`), если MLflow доступен и Production-версия существует.
 
 ### 7) Запуск автотестов
 
@@ -359,3 +364,92 @@ curl -sS "http://127.0.0.1:8000/api/v1/text/results/<uuid>"
 ```json
 {"task_id":"<uuid>","status":"SUCCESS","result":{"language_code":"de","confidence":0.97}}
 ```
+
+## Лабораторная 5 (вариант 13): MLflow + GitHub Actions
+
+Цель: автоматизировать цикл проверки, обучения и сборки под требования варианта 13.
+
+Что реализовано:
+- логирование обучения в MLflow (`scripts/train_model.py`);
+- регистрация модели в MLflow Registry под именем `language_detector`;
+- quality gate в CI: `accuracy > 0.98` (`scripts/quality_gate.py`);
+- загрузка модели в API/worker только из MLflow Registry (stage `Production`) (`src/presentation/dependencies.py`);
+- пайплайн GitHub Actions в `.github/workflows/main.yml` со стадиями `test`, `train`, `build`;
+- сборка и push образов `lang-api:latest` и `lang-worker:latest`.
+
+### 1) Локальный запуск с MLflow
+
+```bash
+cd E:\pythonProdgect\churn_prediction
+poetry install
+docker compose up -d --build
+```
+
+После старта доступны:
+- API: `http://localhost:8000`
+- MinIO Console: `http://localhost:9001`
+- MLflow UI: `http://localhost:5000`
+
+### 2) Обучение и регистрация модели в MLflow
+
+```bash
+poetry run python scripts/train_model.py --corpus-root data/corpus --models-dir models --accuracy-threshold 0.98
+```
+
+Скрипт:
+- обучает модель;
+- логирует параметры/метрику `accuracy`;
+- логирует ONNX + `classes.json` как артефакты;
+- регистрирует модель `language_detector` в Registry;
+- в CI запускается с `--skip-dvc`, потому что источник модели для runtime — только MLflow.
+
+### 3) Перевод версии модели в Production
+
+В UI MLflow откройте `Models -> language_detector -> Version` и установите stage `Production`.
+
+### 4) Проверка загрузки модели из MLflow
+
+Удалите локальные `models/language_detector.onnx` и `models/classes.json`, затем запустите API/worker заново.  
+При старте сервис загрузит артефакты из MLflow Registry (Production версия).
+
+### 5) GitHub Actions (self-hosted runner)
+
+Файл: `.github/workflows/main.yml`
+
+Стадии:
+- `test`:
+  - настройка DVC remote `myremote` через GitHub Secrets;
+  - `dvc pull` (датасет `data/corpus` скачивается из DVC перед проверками);
+  - `ruff check .`
+  - `python scripts/quality_gate.py --threshold 0.98`
+- `train`:
+  - повторная настройка DVC remote;
+  - повторный `dvc pull` датасета;
+  - запуск обучения с MLflow логированием
+- `build`:
+  - сборка Docker-образов
+  - push в GHCR:
+    - `ghcr.io/<owner>/lang-api:latest`
+    - `ghcr.io/<owner>/lang-worker:latest`
+
+### 6) Что нужно добавить в GitHub env/secrets (обязательно)
+
+В `Settings -> Secrets and variables -> Actions`:
+- `DVC_ACCESS_KEY_ID` — ключ для DVC remote `myremote` (где хранится `data/corpus`);
+- `DVC_SECRET_ACCESS_KEY` — секрет для DVC remote `myremote`;
+- `DVC_ENDPOINTURL` — endpoint S3/MinIO для DVC (например, `http://<host>:9000`);
+- `MLFLOW_TRACKING_URI` — URL MLflow tracking server;
+- `AWS_ACCESS_KEY_ID` — ключ доступа для MLflow artifact store;
+- `AWS_SECRET_ACCESS_KEY` — секрет для MLflow artifact store;
+- `MLFLOW_S3_ENDPOINT_URL` — endpoint S3/MinIO для артефактов MLflow.
+
+Рекомендуется как repository secrets (не variables), чтобы креды не были видны в логах.
+
+### 7) Полная проверка ЛР5
+
+1. Сделать commit/push в `main`.
+2. Убедиться, что pipeline прошел `test -> train -> build`.
+3. Проверить MLflow UI: появился новый run с метрикой и артефактами.
+4. Проверить Registry: новая версия `language_detector`.
+5. Перевести версию в `Production` и запустить `docker compose up -d --build`.
+6. Отправить запрос в API и получить корректный ответ детекции языка.
