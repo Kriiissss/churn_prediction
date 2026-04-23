@@ -419,12 +419,12 @@ poetry run python scripts/train_model.py --corpus-root data/corpus --models-dir 
 Стадии:
 - `test`:
   - настройка DVC remote `myremote` через GitHub Secrets;
-  - `dvc pull` (датасет `data/corpus` скачивается из DVC перед проверками);
+  - `dvc pull data/corpus.dvc` (датасет `data/corpus` скачивается из DVC перед проверками);
   - `ruff check .`
   - `python scripts/quality_gate.py --threshold 0.98`
 - `train`:
   - повторная настройка DVC remote;
-  - повторный `dvc pull` датасета;
+  - повторный `dvc pull data/corpus.dvc`;
   - запуск обучения с MLflow логированием
 - `build`:
   - сборка Docker-образов

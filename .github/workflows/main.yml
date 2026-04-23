@@ -49,7 +49,7 @@ jobs:
       - name: Pull dataset from DVC
         shell: bash
         run: |
-          poetry run dvc pull
+          poetry run dvc pull data/corpus.dvc
           test -d data/corpus || (echo "data/corpus not found after dvc pull" && exit 1)
 
       - name: Ruff
@@ -108,7 +108,7 @@ jobs:
       - name: Pull dataset from DVC
         shell: bash
         run: |
-          poetry run dvc pull
+          poetry run dvc pull data/corpus.dvc
           test -d data/corpus || (echo "data/corpus not found after dvc pull" && exit 1)
 
       - name: Validate MLflow config
