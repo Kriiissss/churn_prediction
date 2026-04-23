@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import random
-import sys
 from pathlib import Path
 
 # Запуск из корня репозитория: poetry run python scripts/...

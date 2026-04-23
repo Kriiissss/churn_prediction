@@ -1,10 +1,9 @@
 import runpy
 import sys
-from typing import Any
 
 import pytest
 
-from src.application.services import ChurnAnalysisService, ChurnServiceConfig
+from src.application.services import ChurnServiceConfig
 from src.domain.entities import ChurnRisk, CustomerActivity
 from src.domain.interfaces import IChurnModel
 from src.infrastructure.churn_model import MockChurnModel
