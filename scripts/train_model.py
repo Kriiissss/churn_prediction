@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 import onnx
-from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
@@ -70,7 +70,14 @@ def build_pipeline() -> Pipeline:
       LogisticRegression(max_iter=1000)
     """
     # Важно: lowercase=False убирает StringNormalizer из ONNX-графа и зависимость от locale.
-    vectorizer = TfidfVectorizer(analyzer="char_wb", ngram_range=(2, 5), lowercase=False, sublinear_tf=True)
+    # В CI runner используется версия skl2onnx, где text vectorizer стабильно
+    # конвертируется в ONNX в word-режиме.
+    vectorizer = CountVectorizer(
+        analyzer="word",
+        ngram_range=(1, 2),
+        token_pattern=r"(?u)\b\w+\b",
+        lowercase=False,
+    )
     clf = LogisticRegression(max_iter=2000, C=8.0)
     return Pipeline([("vect", vectorizer), ("clf", clf)])
 
@@ -149,6 +156,10 @@ class LanguageDetectorSklearn:
 
 
 def main() -> int:
+    # На Windows cp1251 MLflow печатает emoji-ссылки и может упасть с UnicodeEncodeError.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     parser = argparse.ArgumentParser(description="Train language detector and export ONNX.")
     parser.add_argument("--corpus-root", type=Path, default=Path("data/corpus"))
     parser.add_argument("--models-dir", type=Path, default=Path("models"))
