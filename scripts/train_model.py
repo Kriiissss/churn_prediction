@@ -75,7 +75,7 @@ def build_pipeline() -> Pipeline:
     vectorizer = CountVectorizer(
         analyzer="word",
         ngram_range=(1, 2),
-        token_pattern=r"(?u)\b\w+\b",
+        token_pattern=r"\b\w+\b",
         lowercase=False,
     )
     clf = LogisticRegression(max_iter=2000, C=8.0)

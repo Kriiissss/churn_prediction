@@ -127,6 +127,34 @@ jobs:
         run: |
           poetry run python scripts/train_model.py --corpus-root data/corpus --models-dir models --skip-dvc --accuracy-threshold 0.98
 
+      - name: Promote latest model to Production
+        shell: bash
+        run: |
+          poetry run python - <<'PY'
+          import os
+          import mlflow
+          from mlflow.tracking import MlflowClient
+
+          tracking_uri = os.environ["MLFLOW_TRACKING_URI"]
+          model_name = os.environ.get("MLFLOW_MODEL_NAME", "language_detector")
+          target_stage = os.environ.get("MLFLOW_MODEL_STAGE", "Production")
+
+          mlflow.set_tracking_uri(tracking_uri)
+          client = MlflowClient()
+          versions = client.search_model_versions(f"name='{model_name}'")
+          if not versions:
+              raise RuntimeError(f"No model versions found for '{model_name}'")
+
+          latest = sorted(versions, key=lambda v: int(v.version), reverse=True)[0]
+          client.transition_model_version_stage(
+              name=model_name,
+              version=latest.version,
+              stage=target_stage,
+              archive_existing_versions=True,
+          )
+          print(f"Promoted {model_name} v{latest.version} to {target_stage}")
+          PY
+
   build:
     name: Build + Push Images
     runs-on: self-hosted

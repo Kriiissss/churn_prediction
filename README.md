@@ -436,7 +436,8 @@ poetry run python scripts/train_model.py --corpus-root data/corpus --models-dir 
 - `train`:
   - повторная настройка DVC remote;
   - повторный `dvc pull data/corpus.dvc`;
-  - запуск обучения с MLflow логированием
+  - запуск обучения с MLflow логированием;
+  - автоматический перевод последней версии `language_detector` в стадию `Production`
 - `build`:
   - сборка Docker-образов
   - push в GHCR:
