@@ -97,7 +97,7 @@ def main() -> int:
     parser.add_argument(
         "--files-per-lang",
         type=int,
-        default=4,
+        default=30,
         help="Сколько .txt файлов на язык (>=3 для требований ЛР)",
     )
     parser.add_argument("--seed", type=int, default=None, help="Seed для воспроизводимости")

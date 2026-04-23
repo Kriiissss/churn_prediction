@@ -13,12 +13,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 import onnx
-from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
@@ -52,8 +53,9 @@ def load_dataset(path: str):
             text = txt_path.read_text(encoding="utf-8")
             if not text.strip():
                 continue
-            texts.append(text.lower())
-            labels.append(label)
+            for variant in _augment_text(text.lower()):
+                texts.append(variant)
+                labels.append(label)
 
     if not texts:
         raise ValueError(f"Не найдено ни одного .txt файла в {corpus_root}")
@@ -68,9 +70,25 @@ def build_pipeline() -> Pipeline:
       LogisticRegression(max_iter=1000)
     """
     # Важно: lowercase=False убирает StringNormalizer из ONNX-графа и зависимость от locale.
-    vectorizer = CountVectorizer(analyzer="char", ngram_range=(1, 3), lowercase=False)
-    clf = LogisticRegression(max_iter=1000)
+    vectorizer = TfidfVectorizer(analyzer="char_wb", ngram_range=(2, 5), lowercase=False, sublinear_tf=True)
+    clf = LogisticRegression(max_iter=2000, C=8.0)
     return Pipeline([("vect", vectorizer), ("clf", clf)])
+
+
+def _augment_text(text: str) -> list[str]:
+    text = text.strip()
+    if not text:
+        return []
+
+    compact = " ".join(text.split())
+    no_punct = re.sub(r"[^\w\s]", " ", compact)
+    no_punct = " ".join(no_punct.split())
+    no_digits = re.sub(r"\d+", " ", compact)
+    no_digits = " ".join(no_digits.split())
+
+    variants = [compact, no_punct, no_digits]
+    # Стабильная дедупликация без изменения порядка.
+    return list(dict.fromkeys(v for v in variants if v))
 
 
 def _repo_root() -> Path:
