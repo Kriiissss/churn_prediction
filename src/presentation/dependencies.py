@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -15,7 +16,7 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def _try_pull_from_mlflow_registry(models_dir: Path) -> bool:
+def _sync_from_mlflow_registry(models_dir: Path) -> bool:
     uri = os.getenv("MLFLOW_TRACKING_URI", "").strip()
     if not uri:
         return False
@@ -33,7 +34,9 @@ def _try_pull_from_mlflow_registry(models_dir: Path) -> bool:
         if not versions:
             return False
 
-        run_id = getattr(versions[0], "run_id", None)
+        # Берем самую новую версию в нужной стадии.
+        latest = sorted(versions, key=lambda mv: int(getattr(mv, "version", "0")), reverse=True)[0]
+        run_id = getattr(latest, "run_id", None)
         if not run_id:
             return False
 
@@ -45,6 +48,20 @@ def _try_pull_from_mlflow_registry(models_dir: Path) -> bool:
         classes_tmp = download_artifacts(classes_uri, dst_path=str(models_dir))
         Path(onnx_tmp).replace(models_dir / "language_detector.onnx")
         Path(classes_tmp).replace(models_dir / "classes.json")
+        (models_dir / "mlflow_model_info.json").write_text(
+            json.dumps(
+                {
+                    "model_name": model_name,
+                    "stage": model_stage,
+                    "version": str(getattr(latest, "version", "")),
+                    "run_id": run_id,
+                    "tracking_uri": uri,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
         return True
     except Exception:
         return False
@@ -53,23 +70,22 @@ def _try_pull_from_mlflow_registry(models_dir: Path) -> bool:
 @lru_cache(maxsize=1)
 def get_inference_service() -> InferenceService:
     """
-    FastAPI dependency:
+    Worker dependency:
       - поднимает ONNXModel
-      - при отсутствии моделей скачивает их только из MLflow Model Registry.
+      - при старте синхронизирует последнюю модель из MLflow Model Registry.
     """
     repo = _repo_root()
     models_dir = repo / "models"
     onnx_path = models_dir / "language_detector.onnx"
     classes_path = models_dir / "classes.json"
 
-    if not onnx_path.is_file() or not classes_path.is_file():
-        models_dir.mkdir(parents=True, exist_ok=True)
-        pulled = _try_pull_from_mlflow_registry(models_dir)
-        if not pulled:
-            raise RuntimeError(
-                "Failed to restore language model artifacts from MLflow Registry. "
-                "Set MLFLOW_TRACKING_URI and ensure a Production version exists for MLFLOW_MODEL_NAME."
-            )
+    models_dir.mkdir(parents=True, exist_ok=True)
+    pulled = _sync_from_mlflow_registry(models_dir)
+    if not pulled:
+        raise RuntimeError(
+            "Failed to restore language model artifacts from MLflow Registry. "
+            "Set MLFLOW_TRACKING_URI and ensure a Production version exists for MLFLOW_MODEL_NAME."
+        )
 
     model = ONNXModel(onnx_path=onnx_path, classes_path=classes_path)
     return InferenceService(model=model)

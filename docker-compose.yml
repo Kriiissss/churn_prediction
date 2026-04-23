@@ -8,17 +8,13 @@ services:
       - churn_net
 
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile.api
+    image: ${GHCR_IMAGE_PREFIX:-ghcr.io/kriiissss}/lang-api:${IMAGE_TAG:-latest}
     container_name: churn_api
+    pull_policy: always
     ports:
       - "8000:8000"
     environment:
       REDIS_URL: redis://broker:6379/0
-      MLFLOW_TRACKING_URI: http://mlflow:5000
-      MLFLOW_MODEL_NAME: language_detector
-      MLFLOW_MODEL_STAGE: Production
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
@@ -32,15 +28,17 @@ services:
       - churn_net
 
   worker:
-    build:
-      context: .
-      dockerfile: Dockerfile.worker
+    image: ${GHCR_IMAGE_PREFIX:-ghcr.io/kriiissss}/lang-worker:${IMAGE_TAG:-latest}
     container_name: churn_worker
+    pull_policy: always
     environment:
       REDIS_URL: redis://broker:6379/0
       MLFLOW_TRACKING_URI: http://mlflow:5000
       MLFLOW_MODEL_NAME: language_detector
       MLFLOW_MODEL_STAGE: Production
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin

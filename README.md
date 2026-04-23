@@ -324,11 +324,13 @@ poetry run python -m pytest -q
 - `Dockerfile.api` — контейнер FastAPI.
 - `Dockerfile.worker` — контейнер Celery worker.
 - `docker-compose.yml` — `api`, `worker`, `broker` (Redis), `minio`, `minio-mc`.
+  `api` и `worker` запускаются из образов GHCR (без локального build).
 
 ### Запуск всей системы
 
 ```bash
-docker compose up -d --build
+docker compose pull api worker
+docker compose up -d
 ```
 
 ### Проверка API (вариант 13)
@@ -382,8 +384,17 @@ curl -sS "http://127.0.0.1:8000/api/v1/text/results/<uuid>"
 ```bash
 cd E:\pythonProdgect\churn_prediction
 poetry install
-docker compose up -d --build
+docker compose pull api worker
+docker compose up -d
 ```
+
+По умолчанию используются:
+- `ghcr.io/kriiissss/lang-api:latest`
+- `ghcr.io/kriiissss/lang-worker:latest`
+
+Можно переопределить через переменные окружения:
+- `GHCR_IMAGE_PREFIX` (например, `ghcr.io/<ваш-ник>`)
+- `IMAGE_TAG` (например, `latest` или `v1.2.3`)
 
 После старта доступны:
 - API: `http://localhost:8000`
@@ -451,5 +462,5 @@ poetry run python scripts/train_model.py --corpus-root data/corpus --models-dir 
 2. Убедиться, что pipeline прошел `test -> train -> build`.
 3. Проверить MLflow UI: появился новый run с метрикой и артефактами.
 4. Проверить Registry: новая версия `language_detector`.
-5. Перевести версию в `Production` и запустить `docker compose up -d --build`.
+5. Перевести версию в `Production` и запустить `docker compose pull api worker && docker compose up -d`.
 6. Отправить запрос в API и получить корректный ответ детекции языка.
