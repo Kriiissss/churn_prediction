@@ -16,10 +16,10 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def _sync_from_mlflow_registry(models_dir: Path) -> bool:
+def _sync_from_mlflow_registry(models_dir: Path) -> tuple[bool, str]:
     uri = os.getenv("MLFLOW_TRACKING_URI", "").strip()
     if not uri:
-        return False
+        return False, "MLFLOW_TRACKING_URI is empty"
 
     model_name = os.getenv("MLFLOW_MODEL_NAME", "language_detector")
     model_stage = os.getenv("MLFLOW_MODEL_STAGE", "Production")
@@ -30,15 +30,16 @@ def _sync_from_mlflow_registry(models_dir: Path) -> bool:
 
         mlflow.set_tracking_uri(uri)
         client = MlflowClient()
-        versions = client.get_latest_versions(model_name, stages=[model_stage])
+        all_versions = client.search_model_versions(f"name='{model_name}'")
+        versions = [mv for mv in all_versions if str(getattr(mv, "current_stage", "")) == model_stage]
         if not versions:
-            return False
+            return False, f"No versions in stage '{model_stage}' for model '{model_name}'"
 
         # Берем самую новую версию в нужной стадии.
         latest = sorted(versions, key=lambda mv: int(getattr(mv, "version", "0")), reverse=True)[0]
         run_id = getattr(latest, "run_id", None)
         if not run_id:
-            return False
+            return False, f"Resolved model version has empty run_id (version={getattr(latest, 'version', '?')})"
 
         onnx_uri = f"runs:/{run_id}/{MLFLOW_ONNX_ARTIFACT_PATH}/model.onnx"
         classes_uri = f"runs:/{run_id}/{MLFLOW_META_ARTIFACT_PATH}/classes.json"
@@ -62,9 +63,9 @@ def _sync_from_mlflow_registry(models_dir: Path) -> bool:
             ),
             encoding="utf-8",
         )
-        return True
-    except Exception:
-        return False
+        return True, ""
+    except Exception as e:  # noqa: BLE001
+        return False, f"{type(e).__name__}: {e}"
 
 
 @lru_cache(maxsize=1)
@@ -80,10 +81,11 @@ def get_inference_service() -> InferenceService:
     classes_path = models_dir / "classes.json"
 
     models_dir.mkdir(parents=True, exist_ok=True)
-    pulled = _sync_from_mlflow_registry(models_dir)
+    pulled, reason = _sync_from_mlflow_registry(models_dir)
     if not pulled:
         raise RuntimeError(
             "Failed to restore language model artifacts from MLflow Registry. "
+            f"Reason: {reason}. "
             "Set MLFLOW_TRACKING_URI and ensure a Production version exists for MLFLOW_MODEL_NAME."
         )
 
