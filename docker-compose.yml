@@ -64,7 +64,7 @@ services:
       MINIO_ROOT_PASSWORD: minioadmin
     command: server /data --console-address ":9001"
     volumes:
-      - minio_data:/data
+      - ./data/minio:/data
     networks:
       - churn_net
 
@@ -110,9 +110,6 @@ services:
       - ./data/mlflow:/mlflow
     networks:
       - churn_net
-
-volumes:
-  minio_data:
 
 networks:
   churn_net:
