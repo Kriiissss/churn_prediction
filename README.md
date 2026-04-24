@@ -375,7 +375,7 @@ curl -sS "http://127.0.0.1:8000/api/v1/text/results/<uuid>"
 - логирование обучения в MLflow (`scripts/train_model.py`);
 - регистрация модели в MLflow Registry под именем `language_detector`;
 - quality gate в CI: `accuracy > 0.98` (`scripts/quality_gate.py`);
-- загрузка модели в API/worker только из MLflow Registry (stage `Production`) (`src/presentation/dependencies.py`);
+- загрузка модели в worker из MLflow Registry по alias `production` (`src/presentation/dependencies.py`);
 - пайплайн GitHub Actions в `.github/workflows/main.yml` со стадиями `test`, `train`, `build`;
 - сборка и push образов `lang-api:latest` и `lang-worker:latest`.
 
@@ -414,14 +414,14 @@ poetry run python scripts/train_model.py --corpus-root data/corpus --models-dir 
 - регистрирует модель `language_detector` в Registry;
 - в CI запускается с `--skip-dvc`, потому что источник модели для runtime — только MLflow.
 
-### 3) Перевод версии модели в Production
+### 3) Перевод версии модели на alias `production`
 
-В UI MLflow откройте `Models -> language_detector -> Version` и установите stage `Production`.
+В UI MLflow откройте `Models -> language_detector` и назначьте alias `production` на нужную версию.
 
 ### 4) Проверка загрузки модели из MLflow
 
 Удалите локальные `models/language_detector.onnx` и `models/classes.json`, затем запустите API/worker заново.  
-При старте сервис загрузит артефакты из MLflow Registry (Production версия).
+При старте worker загрузит артефакты из MLflow Registry по alias `production`.
 
 ### 5) GitHub Actions (self-hosted runner)
 
@@ -437,7 +437,7 @@ poetry run python scripts/train_model.py --corpus-root data/corpus --models-dir 
   - повторная настройка DVC remote;
   - повторный `dvc pull data/corpus.dvc`;
   - запуск обучения с MLflow логированием;
-  - автоматический перевод последней версии `language_detector` в стадию `Production`
+  - автоматическое назначение alias `production` на последнюю версию `language_detector`
 - `build`:
   - сборка Docker-образов
   - push в GHCR:
@@ -463,5 +463,5 @@ poetry run python scripts/train_model.py --corpus-root data/corpus --models-dir 
 2. Убедиться, что pipeline прошел `test -> train -> build`.
 3. Проверить MLflow UI: появился новый run с метрикой и артефактами.
 4. Проверить Registry: новая версия `language_detector`.
-5. Перевести версию в `Production` и запустить `docker compose pull api worker && docker compose up -d`.
+5. Назначить alias `production` на нужную версию (или дождаться автошага CI) и запустить `docker compose pull api worker && docker compose up -d`.
 6. Отправить запрос в API и получить корректный ответ детекции языка.

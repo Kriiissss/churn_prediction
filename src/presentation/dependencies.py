@@ -22,6 +22,7 @@ def _sync_from_mlflow_registry(models_dir: Path) -> tuple[bool, str]:
         return False, "MLFLOW_TRACKING_URI is empty"
 
     model_name = os.getenv("MLFLOW_MODEL_NAME", "language_detector")
+    model_alias = os.getenv("MLFLOW_MODEL_ALIAS", "production")
     model_stage = os.getenv("MLFLOW_MODEL_STAGE", "Production")
     try:
         import mlflow
@@ -30,13 +31,23 @@ def _sync_from_mlflow_registry(models_dir: Path) -> tuple[bool, str]:
 
         mlflow.set_tracking_uri(uri)
         client = MlflowClient()
-        all_versions = client.search_model_versions(f"name='{model_name}'")
-        versions = [mv for mv in all_versions if str(getattr(mv, "current_stage", "")) == model_stage]
-        if not versions:
-            return False, f"No versions in stage '{model_stage}' for model '{model_name}'"
-
-        # Берем самую новую версию в нужной стадии.
-        latest = sorted(versions, key=lambda mv: int(getattr(mv, "version", "0")), reverse=True)[0]
+        latest = None
+        # MLflow 3.x path: alias-based resolution.
+        if model_alias:
+            try:
+                latest = client.get_model_version_by_alias(model_name, model_alias)
+            except Exception:
+                latest = None
+        # Backward-compatible fallback for setups that still use stages.
+        if latest is None:
+            all_versions = client.search_model_versions(f"name='{model_name}'")
+            versions = [mv for mv in all_versions if str(getattr(mv, "current_stage", "")) == model_stage]
+            if not versions:
+                return False, (
+                    f"No model found by alias '{model_alias}' and no versions in stage "
+                    f"'{model_stage}' for model '{model_name}'"
+                )
+            latest = sorted(versions, key=lambda mv: int(getattr(mv, "version", "0")), reverse=True)[0]
         run_id = getattr(latest, "run_id", None)
         if not run_id:
             return False, f"Resolved model version has empty run_id (version={getattr(latest, 'version', '?')})"
@@ -53,6 +64,7 @@ def _sync_from_mlflow_registry(models_dir: Path) -> tuple[bool, str]:
             json.dumps(
                 {
                     "model_name": model_name,
+                    "alias": model_alias,
                     "stage": model_stage,
                     "version": str(getattr(latest, "version", "")),
                     "run_id": run_id,

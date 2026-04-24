@@ -172,6 +172,7 @@ def main() -> int:
     )
     parser.add_argument("--model-name", type=str, default=os.getenv("MLFLOW_MODEL_NAME", "language_detector"))
     parser.add_argument("--model-stage", type=str, default=os.getenv("MLFLOW_MODEL_STAGE", "Production"))
+    parser.add_argument("--model-alias", type=str, default=os.getenv("MLFLOW_MODEL_ALIAS", "production"))
     parser.add_argument("--accuracy-threshold", type=float, default=0.98)
     parser.add_argument(
         "--mlflow-experiment",
@@ -202,10 +203,13 @@ def main() -> int:
             {
                 "model_name": args.model_name,
                 "model_stage": args.model_stage,
-                "vectorizer_analyzer": "char",
-                "vectorizer_ngram_range": "(1,3)",
+                "model_alias": args.model_alias,
+                "vectorizer_analyzer": "word",
+                "vectorizer_ngram_range": "(1,2)",
+                "vectorizer_token_pattern": r"\b\w+\b",
                 "classifier": "LogisticRegression",
-                "classifier_max_iter": 1000,
+                "classifier_max_iter": 2000,
+                "classifier_C": 8.0,
                 "test_size": args.test_size,
                 "random_state": args.random_state,
             }
